@@ -1,52 +1,91 @@
 import express from "express";
 import cors from "cors";
-import products from "./data.json" assert { type: "json" };
-import fetch from "node-fetch";
+import { pool } from "./db.js";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 4002;
-const SERVICE = process.env.SERVICE_NAME || "products-api";
-const USERS_API_URL = process.env.USERS_API_URL || "http://users-api:4001";
 
-app.get("/health", (_req, res) => res.json({ status: "ok", service: SERVICE }));
+/*
+  Esquema/tabla recomendados en PostgreSQL:
+  CREATE SCHEMA IF NOT EXISTS products_schema AUTHORIZATION <admin_user>;
+  CREATE TABLE IF NOT EXISTS products_schema.products (
+    id    SERIAL PRIMARY KEY,
+    name  TEXT NOT NULL,
+    price NUMERIC(10,2) NOT NULL
+  );
+*/
+
+// Health
+app.get("/health", (_req, res) => res.json({ status: "ok", service: "products-api" }));
 
 // GET /products
-app.get("/products", (_req, res) => res.json(products));
-
-// Ejemplo de comunicación entre servicios (compose crea la red):
-// GET /products/with-users  -> concatena productos con conteo de usuarios (mock)
-app.get("/products/with-users", async (_req, res) => {
+app.get("/products", async (_req, res) => {
   try {
-    const r = await fetch(`${USERS_API_URL}/users`);
-    const users = await r.json();
-    res.json({
-      products,
-      usersCount: Array.isArray(users) ? users.length : 0
-    });
+    const r = await pool.query("SELECT id, name, price FROM products_schema.products ORDER BY id ASC");
+    res.json(r.rows);
   } catch (e) {
-    res.status(502).json({ error: "No se pudo consultar users-api", detail: String(e) });
+    console.error("GET /products error:", e);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
-// GET /products/:id
-app.get("/products/:id", (req, res) => {
-  const p = products.find(x => String(x.id) === String(req.params.id));
-  if (!p) return res.status(404).json({ error: "Product not found" });
-  res.json(p);
+// POST /products
+app.post("/products", async (req, res) => {
+  try {
+    const { name, price } = req.body ?? {};
+    if (!name || price == null) return res.status(400).json({ error: "name & price required" });
+
+    const r = await pool.query(
+      "INSERT INTO products_schema.products (name, price) VALUES ($1, $2) RETURNING id, name, price",
+      [name, price]
+    );
+    res.status(201).json(r.rows[0]);
+  } catch (e) {
+    console.error("POST /products error:", e);
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
-// POST /products (simulado)
-app.post("/products", (req, res) => {
-  res.status(201).json({
-    message: "Simulado: se crearía el producto",
-    payload: req.body
-  });
+// PUT /products/:id
+app.put("/products/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, price } = req.body ?? {};
+
+    const r = await pool.query(
+      "UPDATE products_schema.products SET name = COALESCE($1, name), price = COALESCE($2, price) WHERE id = $3 RETURNING id, name, price",
+      [name, price, id]
+    );
+
+    if (r.rows.length === 0) return res.status(404).json({ error: "Product not found" });
+    res.json(r.rows[0]);
+  } catch (e) {
+    console.error("PUT /products/:id error:", e);
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
-app.listen(PORT, () => {
-  console.log(`✅ ${SERVICE} listening on http://localhost:${PORT}`);
-  console.log(`↔️  USERS_API_URL=${USERS_API_URL}`);
+// DELETE /products/:id
+app.delete("/products/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const r = await pool.query(
+      "DELETE FROM products_schema.products WHERE id = $1 RETURNING id, name, price",
+      [id]
+    );
+
+    if (r.rows.length === 0) return res.status(404).json({ error: "Product not found" });
+    res.json({ message: "Product deleted", product: r.rows[0] });
+  } catch (e) {
+    console.error("DELETE /products/:id error:", e);
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
+
+// Mantén /health si ya lo tenías
+app.get("/health", (_req, res) => res.json({ status: "ok", service: "users-api" }));
+
+app.listen(PORT, () => console.log(`✅ users-api on http://localhost:${PORT}`));
