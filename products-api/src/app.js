@@ -18,6 +18,16 @@ const PORT = process.env.PORT || 4002;
   );
 */
 
+// Health DB
+app.get("/db/health", async (_req, res) => {
+  try {
+    const r = await pool.query("SELECT 1 AS ok");
+    res.json({ ok: r.rows[0].ok === 1 });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
 // Health
 app.get("/health", (_req, res) => res.json({ status: "ok", service: "products-api" }));
 
@@ -28,6 +38,26 @@ app.get("/products", async (_req, res) => {
     res.json(r.rows);
   } catch (e) {
     console.error("GET /products error:", e);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /products/:id
+app.get("/products/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      "SELECT * FROM products_schema.products WHERE id = $1",
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error("Error en GET /products/:id:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -84,8 +114,5 @@ app.delete("/products/:id", async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
-
-// Mantén /health si ya lo tenías
-app.get("/health", (_req, res) => res.json({ status: "ok", service: "users-api" }));
 
 app.listen(PORT, () => console.log(`✅ users-api on http://localhost:${PORT}`));
