@@ -16,8 +16,8 @@ services:
     environment:
       - PORT=4002
       - SERVICE_NAME=products-api
-      - DATABASE_URL=${PRODUCTS_DATABASE_URL}   # 👈 su propia conexión
-      # (si products también consume a users por HTTP, añade:)
+      - MONGO_URI=${PRODUCTS_MONGO_URI}   # 👈 cambia a Cosmos
+      # (opcional) si consumes users por HTTP:
       # - USERS_API_URL=http://users-api:4001
     ports:
       - "4002:4002"

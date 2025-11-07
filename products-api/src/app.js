@@ -1,43 +1,34 @@
 import express from "express";
 import cors from "cors";
-import { pool } from "./db.js";
+import { Product } from "./models/product.js";
+import mongoose from "mongoose";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const PORT = process.env.PORT || 4002;
+// Health (sin tocar BD)
+app.get("/health", (_req, res) => {
+  res.json({ status: "ok", service: "products-api", driver: "mongoose" });
+});
 
-/*
-  Esquema/tabla recomendados en PostgreSQL:
-  CREATE SCHEMA IF NOT EXISTS products_schema AUTHORIZATION <admin_user>;
-  CREATE TABLE IF NOT EXISTS products_schema.products (
-    id    SERIAL PRIMARY KEY,
-    name  TEXT NOT NULL,
-    price NUMERIC(10,2) NOT NULL
-  );
-*/
-
-// Health DB
+// Health de BD (consulta liviana)
 app.get("/db/health", async (_req, res) => {
   try {
-    const r = await pool.query("SELECT 1 AS ok");
-    res.json({ ok: r.rows[0].ok === 1 });
+    // ping a admin:
+    await mongoose.connection.db.admin().ping();
+    res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
 
-// Health
-app.get("/health", (_req, res) => res.json({ status: "ok", service: "products-api" }));
-
 // GET /products
 app.get("/products", async (_req, res) => {
   try {
-    const r = await pool.query("SELECT id, name, price FROM products_schema.products ORDER BY id ASC");
-    res.json(r.rows);
+    const docs = await Product.find().sort({ _id: 1 }).lean();
+    res.json(docs);
   } catch (e) {
-    console.error("GET /products error:", e);
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -46,18 +37,16 @@ app.get("/products", async (_req, res) => {
 app.get("/products/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await pool.query(
-      "SELECT * FROM products_schema.products WHERE id = $1",
-      [id]
-    );
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: "Product not found" });
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ error: "Invalid ObjectId" });
     }
 
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error("Error en GET /products/:id:", err);
+    const doc = await Product.findById(id).lean();
+    if (!doc) return res.status(404).json({ error: "Product not found" });
+
+    res.json(doc);
+  } catch (e) {
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -66,16 +55,14 @@ app.get("/products/:id", async (req, res) => {
 app.post("/products", async (req, res) => {
   try {
     const { name, price } = req.body ?? {};
-    if (!name || price == null) return res.status(400).json({ error: "name & price required" });
+    if (!name || price == null) {
+      return res.status(400).json({ error: "name & price required" });
+    }
 
-    const r = await pool.query(
-      "INSERT INTO products_schema.products (name, price) VALUES ($1, $2) RETURNING id, name, price",
-      [name, price]
-    );
-    res.status(201).json(r.rows[0]);
+    const doc = await Product.create({ name, price });
+    res.status(201).json(doc);
   } catch (e) {
-    console.error("POST /products error:", e);
-    res.status(500).json({ error: "Internal server error" });
+    res.status(500).json({ error: "Internal server error", detail: String(e) });
   }
 });
 
@@ -83,17 +70,20 @@ app.post("/products", async (req, res) => {
 app.put("/products/:id", async (req, res) => {
   try {
     const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ error: "Invalid ObjectId" });
+    }
+
     const { name, price } = req.body ?? {};
+    const doc = await Product.findByIdAndUpdate(
+      id,
+      { $set: { ...(name && { name }), ...(price != null && { price }) } },
+      { new: true }
+    ).lean();
 
-    const r = await pool.query(
-      "UPDATE products_schema.products SET name = COALESCE($1, name), price = COALESCE($2, price) WHERE id = $3 RETURNING id, name, price",
-      [name, price, id]
-    );
-
-    if (r.rows.length === 0) return res.status(404).json({ error: "Product not found" });
-    res.json(r.rows[0]);
+    if (!doc) return res.status(404).json({ error: "Product not found" });
+    res.json(doc);
   } catch (e) {
-    console.error("PUT /products/:id error:", e);
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -102,17 +92,17 @@ app.put("/products/:id", async (req, res) => {
 app.delete("/products/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const r = await pool.query(
-      "DELETE FROM products_schema.products WHERE id = $1 RETURNING id, name, price",
-      [id]
-    );
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ error: "Invalid ObjectId" });
+    }
 
-    if (r.rows.length === 0) return res.status(404).json({ error: "Product not found" });
-    res.json({ message: "Product deleted", product: r.rows[0] });
+    const r = await Product.deleteOne({ _id: id });
+    if (r.deletedCount === 0) return res.status(404).json({ error: "Product not found" });
+
+    res.json({ message: "Product deleted" });
   } catch (e) {
-    console.error("DELETE /products/:id error:", e);
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
-app.listen(PORT, () => console.log(`✅ users-api on http://localhost:${PORT}`));
+export default app;

@@ -460,13 +460,4 @@ docker compose up --build
 - **Error de ObjectId** → valida con `mongoose.isValidObjectId(id)` (ya incluido).  
 - **Índices** → si agregas filtros (p.ej., `category`), crea índices en el esquema y vuelve a desplegar.
 
----
-
-# 🧠 Resumen
-
-- Mantienes **users** en **SQL** y migras **products** a **NoSQL**, mostrando **poliglot persistence** real.  
-- Reutilizas **ACR + Actions + App Service (sidecar + webhook)**.  
-- Aprendes **firewall / redes** en Cosmos y **TLS** obligatorio.  
-- Los estudiantes comparan **SQL vs NoSQL** en la misma arquitectura. ✨
-
 --- 
